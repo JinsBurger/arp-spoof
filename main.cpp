@@ -1,7 +1,11 @@
 #include <cstdio>
 #include <pthread.h>
 #include <pcap.h>
-#include "attack.h"
+#include <linux/if.h>
+#include <sys/ioctl.h>
+#include <netdb.h>
+#include <string.h>
+#include "attack.hpp"
 
 int get_my_mac(char *if_name, char *dst, size_t dst_size) {
     struct ifreq s;
@@ -85,9 +89,11 @@ int main(int argc, char* argv[]) {
 	threads = (pthread_t*)malloc(pair_size*sizeof(pthread_t));
 	spoof_args = (spoof_th_arg**)malloc(pair_size*sizeof(spoof_args[0]));
 
+
+
 	for(int i=2; i < argc; i+=2) {
 		int idx = (i-2)/2;
-		spoof_th_arg * new_spoof_arg = (spoof_th_arg*)malloc(sizeof(spoof_th_arg));
+		spoof_th_arg *new_spoof_arg = (spoof_th_arg*)malloc(sizeof(spoof_th_arg));
 		new_spoof_arg->handle = handle;
 		new_spoof_arg->my_mac = Mac(my_mac);
 		new_spoof_arg->my_ip = Ip(my_ip);
@@ -95,7 +101,7 @@ int main(int argc, char* argv[]) {
 		new_spoof_arg->target_ip = Ip(argv[i+1]);
 
 		spoof_args[idx] = new_spoof_arg;
-		pthread_create(&threads[idx], NULL, th_spoof_proc, (void*)spoof_args[idx]);
+		pthread_create(&threads[idx], NULL, spoof_proc_th, (void*)spoof_args[idx]);
 	}
 
 	for(int i=0; i < pair_size; i++) {
