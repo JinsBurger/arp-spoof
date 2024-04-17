@@ -109,7 +109,7 @@ int main(int argc, char* argv[]) {
 				(handle, Mac(my_mac), Ip(my_ip), Ip(argv[i]), &out), 
 				return -1;
 			)
-			
+
 			IpMacMap.insert(make_pair(Ip(argv[i]), out));
 			if(i % 2 == 1 && ST_IP_map.find(Ip(argv[i])) == ST_IP_map.end()) {
 				ST_IP_map.insert(make_pair(Ip(argv[i-1]), Ip(argv[i])));
@@ -152,11 +152,12 @@ int main(int argc, char* argv[]) {
 	for(int i=0; i < pair_size; i++) 
 		pthread_create(&spoof_threads[i], NULL, spoof_proc, (void*)arp_info_args[i]);
 
-	printf("asdasd > \n");
+	printf("If you want to quit, enter 'q' > ");
 	fflush(stdout);
-	getchar();
+	while(getchar() != 'q');
 	/* Terminate All Attack threads */
 	terminate_attack_thread();
+	printf("Terminating Thread...\n");
 	for(int i=0; i < pair_size; i++) {
 		pthread_join(spoof_threads[i], NULL);
 		pthread_join(arp_threads[i], NULL);
