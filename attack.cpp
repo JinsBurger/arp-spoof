@@ -94,10 +94,7 @@ void *spoof_proc(void *arg) {
             Ip t_ip = Ip("0.0.0.0");
             if(ST_IP_map.find(ipv4_hdr->sip()) !=  ST_IP_map.end() )
                t_ip = ST_IP_map[ipv4_hdr->sip()];
-            if(ST_IP_map.find(ipv4_hdr->dip()) !=  ST_IP_map.end() )
-               t_ip = ipv4_hdr->dip(); // Destination must be maintained
-
-
+               
             if(t_ip != Ip("0.0.0.0")) { // If it existed, It would be set
                 etharp->eth_.smac_ = arp_info->my_mac;
                 etharp->eth_.dmac_ = IpMacMap[t_ip];
