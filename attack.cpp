@@ -99,11 +99,6 @@ void *spoof_proc(void *arg) {
 
 
             if(t_ip != Ip("0.0.0.0")) { // If it existed, It would be set
-                //printf("relay!!, \n");
-                
-                uint8_t* mac = (uint8_t*)IpMacMap[t_ip];
-                //printf( "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
                 etharp->eth_.smac_ = arp_info->my_mac;
                 etharp->eth_.dmac_ = IpMacMap[t_ip];
                 ERR_CHK (

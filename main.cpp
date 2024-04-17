@@ -109,11 +109,7 @@ int main(int argc, char* argv[]) {
 				(handle, Mac(my_mac), Ip(my_ip), Ip(argv[i]), &out), 
 				return -1;
 			)
-
-			//printf( "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
-
-
+			
 			IpMacMap.insert(make_pair(Ip(argv[i]), out));
 			if(i % 2 == 1 && ST_IP_map.find(Ip(argv[i])) == ST_IP_map.end()) {
 				ST_IP_map.insert(make_pair(Ip(argv[i-1]), Ip(argv[i])));
